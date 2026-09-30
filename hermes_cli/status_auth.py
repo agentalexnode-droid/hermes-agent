@@ -183,7 +183,12 @@ def _render_apikey_providers(ctx):
     _status._section("API-Key Providers")
     for pname, env_vars in _APIKEY_PROVIDERS.items():
         configured = bool(_status._first_env_value(env_vars))
-        _status._row(pname, configured, "configured" if configured else "not configured (run: hermes model)", 16, " ")
+        # Token PRESENCE, not health: say so, or a working-looking row reads as a verified route.
+        # `hermes doctor` runs the live probes; nothing here contacts the provider.
+        _status._row(
+            pname, configured,
+            "key present (unverified)" if configured else "not configured (run: hermes model)",
+            16, " ")
 
     # LM Studio reachability: probe only when it is the active provider so users with foreign
     # configs see no noise. Auth rejection vs. a silent empty list is the common support case.

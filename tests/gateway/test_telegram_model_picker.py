@@ -71,6 +71,102 @@ class TestTelegramModelPicker:
         assert "provider\\_one" in edit_kwargs["text"]
         assert "`model_1`" in edit_kwargs["text"]
 
+    def test_sort_models_free_first_regular_middle_gpt_claude_end(self):
+        models = [
+            "openai/gpt-4o",
+            "anthropic/claude-3-5-sonnet",
+            "meta/llama-3-8b",
+            "qwen/qwen-2.5-72b",
+            "mistral/mistral-large",
+            "nvidia/nemotron-free:free",
+            "google/gemini-2.0-flash",
+        ]
+        pricing = {
+            "nvidia/nemotron-free:free": {"prompt": "0", "completion": "0"},
+            "openai/gpt-4o": {"prompt": "0.0000025", "completion": "0.00001"},
+            "anthropic/claude-3-5-sonnet": {"prompt": "0.000003", "completion": "0.000015"},
+            "meta/llama-3-8b": {"prompt": "0.0000001", "completion": "0.0000002"},
+            "qwen/qwen-2.5-72b": {"prompt": "0.0000004", "completion": "0.000001"},
+            "mistral/mistral-large": {"prompt": "0.000002", "completion": "0.000006"},
+            "google/gemini-2.0-flash": {"prompt": "0.0000001", "completion": "0.0000004"},
+        }
+        sorted_models = TelegramAdapter._sort_models_for_picker(models, "openrouter", pricing)
+
+        # Free models first (reversed)
+        assert sorted_models[0] == "nvidia/nemotron-free:free"
+
+        # Regular models (reversed: gemini, mistral, qwen, llama)
+        assert sorted_models[1:5] == [
+            "google/gemini-2.0-flash",
+            "mistral/mistral-large",
+            "qwen/qwen-2.5-72b",
+            "meta/llama-3-8b",
+        ]
+
+        # GPT and Claude models at the end (reversed: claude, gpt)
+        assert sorted_models[5:] == [
+            "anthropic/claude-3-5-sonnet",
+            "openai/gpt-4o",
+        ]
+
+    def test_pricing_and_discount_formatting(self):
+        # 1. Free model
+        free_info = {
+            "has_pricing": True, "is_free": True,
+            "input": "free", "output": "free", "cache": "", "discount_percent": 100
+        }
+        line = TelegramAdapter._format_model_pricing_line("vendor/model:free", free_info)
+        assert "🆓 *Free*" in line
+
+        # 2. Regular priced model
+        paid_info = {
+            "has_pricing": True, "is_free": False,
+            "input": "$1.00", "output": "$3.00", "cache": "$0.25", "discount_percent": None
+        }
+        line = TelegramAdapter._format_model_pricing_line("vendor/paid-model", paid_info)
+        assert "📥 $1.00/M" in line
+        assert "📤 $3.00/M" in line
+        assert "⚡ Cache: $0.25/M" in line
+
+        # 3. Model on discount/sale promo
+        sale_info = {
+            "has_pricing": True, "is_free": False,
+            "input": "$0.50", "output": "$2.00", "cache": "",
+            "discount_percent": 50, "was_input": "$1.00", "was_output": "$4.00"
+        }
+        line = TelegramAdapter._format_model_pricing_line("vendor/sale-model", sale_info)
+        assert "50% OFF" in line
+        assert "was $1.00/$4.00" in line
+
+    @pytest.mark.asyncio
+    async def test_picker_show_models_displays_pricing_and_promotions(self):
+        adapter = _make_adapter()
+        state = {
+            "providers": [{"slug": "test_prov", "name": "Test Provider", "models": ["a/m1:free", "a/m2", "a/m3"], "total_models": 3}],
+            "selected_provider": "test_prov",
+            "selected_provider_name": "Test Provider",
+            "model_list": ["a/m1:free", "a/m2", "a/m3"],
+            "pricing": {
+                "a/m1:free": {"prompt": "0", "completion": "0"},
+                "a/m2": {"prompt": "0.000001", "completion": "0.000004", "original": {"prompt": "0.000002", "completion": "0.000008"}},
+                "a/m3": {"prompt": "0.000003", "completion": "0.000015"},
+            },
+        }
+
+        query = AsyncMock()
+        query.edit_message_text = AsyncMock()
+        query.answer = AsyncMock()
+
+        await adapter._picker_show_models(query, state, 0)
+
+        edit_kwargs = query.edit_message_text.call_args[1]
+        text = edit_kwargs["text"]
+        # Must contain provider name, markdown-v2 escaped pricing details, and discount
+        assert "Test Provider" in text
+        assert "Free" in text
+        assert "50% OFF" in text
+
+
 
 def _gateway_wired_adapter():
     """Real adapter with the real gateway auth callback, as ``GatewayRunner`` wires it."""

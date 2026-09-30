@@ -46,6 +46,30 @@ _INIT_LOCK_TIMEOUT_SECONDS = 10.0
 _INIT_LOCK_POLL_SECONDS = 0.05
 
 
+def _repair_wal_shm_dir_siblings(path: Path) -> None:
+    """Repair a known SQLite failure mode: ``*-wal`` / ``*-shm`` siblings that
+    are *directories* instead of regular files.
+
+    If a crash or stray tooling creates ``<db>-wal/`` or ``<db>-shm/`` as a
+    directory, every subsequent ``sqlite3.connect`` raises
+    ``OperationalError: unable to open database file`` until the directory is
+    removed --- SQLite expects these as regular files and recreates them on open.
+    Seen in production on 2026-08-24 (197 gateway kanban errors over 2h).
+
+    Only removes an entry that (a) exists, (b) is a directory, and (c) matches
+    the exact ``-wal`` / ``-shm`` sibling names. Any other path is left alone.
+    """
+    for suffix in ("-wal", "-shm"):
+        actual = path.parent / f"{path.name}{suffix}"
+        if actual.is_dir():
+            try:
+                shutil.rmtree(actual)
+            except OSError:
+                # Best-effort: if we can't remove it, let the connect() error
+                # surface normally rather than masking with a swallowed trace.
+                pass
+
+
 def _resolve_busy_timeout_ms() -> int:
     """Return the SQLite busy timeout for Kanban connections. Kanban is the
     shared cross-profile dispatch bus, so worker stampedes are expected; a
@@ -685,6 +709,12 @@ def connect(db_path: Optional[Path] = None, *, board: Optional[str] = None) -> s
             raise PermissionError("Kanban descendants require an initialized board; ask its owner to initialize it")
         return conn
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Guard against WAL/SHM siblings that became *directories* instead of
+    # regular files (seen 2026-08-24: kanban.db-shm / kanban.db-wal were dirs,
+    # causing `sqlite3.OperationalError: unable to open database file` on every
+    # connect until removed). SQLite always recreates these as regular files on
+    # open, so removing a stray directory is safe and self-healing.
+    _repair_wal_shm_dir_siblings(path)
 
     # Fast path: once THIS process has initialized this path, skip the
     # cross-process init lock. Taking it on every connect let a single stalled

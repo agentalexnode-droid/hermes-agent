@@ -170,6 +170,11 @@ def resolve_gateway_approval(session_key: str, choice: str,
             if reason:
                 entry.reason = reason
             entry.event.set()
+    try:
+        from tools.prompt_queue import sync as _pq_sync
+        _pq_sync()
+    except Exception:
+        pass
     return len(targets)
 
 

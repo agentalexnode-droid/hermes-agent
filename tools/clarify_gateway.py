@@ -55,6 +55,11 @@ def register(clarify_id: str, session_key: str, question: str, choices: Optional
     with _lock:
         _entries[clarify_id] = entry
         _session_index.setdefault(session_key, []).append(clarify_id)
+    try:
+        from tools.prompt_queue import sync as _pq_sync
+        _pq_sync()
+    except Exception:
+        pass
     return entry
 
 
@@ -80,6 +85,11 @@ def wait_for_response(clarify_id: str, timeout: float) -> Optional[str]:
         # code execution (#10807).
         if touch_activity_if_due is not None:
             touch_activity_if_due(activity_state, "waiting for user clarify response")
+        try:
+            from tools.prompt_queue import drain_responses
+            drain_responses()
+        except Exception:
+            pass
     with _lock:
         _entries.pop(clarify_id, None)  # regardless of outcome
         ids = _session_index.get(entry.session_key) or []
@@ -87,6 +97,11 @@ def wait_for_response(clarify_id: str, timeout: float) -> Optional[str]:
             ids.remove(clarify_id)
             if not ids:
                 _session_index.pop(entry.session_key, None)
+    try:
+        from tools.prompt_queue import sync as _pq_sync
+        _pq_sync()
+    except Exception:
+        pass
     return entry.response
 
 
@@ -98,7 +113,12 @@ def resolve_gateway_clarify(clarify_id: str, response: str) -> bool:
             return False
         entry.response = str(response) if response is not None else ""
         entry.event.set()
-        return True
+    try:
+        from tools.prompt_queue import sync as _pq_sync
+        _pq_sync()
+    except Exception:
+        pass
+    return True
 
 
 def get_pending_for_session(session_key: str, *, include_choice_prompts: bool = False) -> Optional[_ClarifyEntry]:

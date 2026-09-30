@@ -71,6 +71,11 @@ def _poll_event(event: threading.Event, session_key: str, *, interrupt_log: str)
             if event.wait(timeout=min(1.0, remaining)):
                 return "set"
             heartbeat()
+            try:
+                from tools.prompt_queue import drain_responses
+                drain_responses()
+            except Exception:
+                pass
 
 
 def _cancel_cause(state: str, entry) -> str | None:
@@ -165,6 +170,11 @@ def _await_gateway_decision(session_key: str, notify_cb, approval_data: dict, *,
     with _approval._lock:
         register_prepared_approval(session_key, entry)
         _approval._gateway_queues.setdefault(session_key, []).append(entry)
+    try:
+        from tools.prompt_queue import sync as _pq_sync
+        _pq_sync()
+    except Exception:
+        pass
 
     def _drop_entry(state: str) -> str | None:
         """Leave the queue and return the choice committed so far. Reading ``entry.result`` and
@@ -180,6 +190,11 @@ def _await_gateway_decision(session_key: str, notify_cb, approval_data: dict, *,
             if not queue:
                 _approval._gateway_queues.pop(session_key, None)
             settle, entry.settle = entry.settle, None
+        try:
+            from tools.prompt_queue import sync as _pq_sync
+            _pq_sync()
+        except Exception:
+            pass
         if settle is not None:
             # ``request.cancel`` carries a RequestCancelReason: a choice committed from another surface is
             # ``resolved``; a withdrawn entry (woken with no choice — session torn down, turn ended, client
