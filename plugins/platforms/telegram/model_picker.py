@@ -30,19 +30,31 @@ from typing import Any, Dict, List, Optional
 
 from telegram import InlineKeyboardButton
 
+from agent.i18n import t
+
+# Telegram caps `query.answer(text=...)` payloads at 200 chars; the adapter's
+# `_toast` applies the same cut. Mirrored here (rather than imported) so this
+# module keeps no adapter dependency — that is what makes it unit-testable.
+_TOAST_LIMIT = 200
+
+
+def _toast(key: str, **kwargs: Any) -> str:
+    """``t()`` for ``query.answer(text=...)`` payloads, cut at Telegram's 200-char toast cap."""
+    return t(key, **kwargs)[:_TOAST_LIMIT]
+
 
 def picker_nav_row(page: int, total_pages: int, prefix: str) -> list:
     """``◀ Prev | n/N | Next ▶`` row (``prefix`` = ``mpv``/``mg`` page callback)."""
     nav: list = []
     if page > 0:
-        nav.append(InlineKeyboardButton("◀ Prev", callback_data=f"{prefix}:{page - 1}"))
+        nav.append(InlineKeyboardButton(t("platform.telegram.picker.prev"), callback_data=f"{prefix}:{page - 1}"))
     nav.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="mx:noop"))
     if page < total_pages - 1:
-        nav.append(InlineKeyboardButton("Next ▶", callback_data=f"{prefix}:{page + 1}"))
+        nav.append(InlineKeyboardButton(t("platform.telegram.picker.next"), callback_data=f"{prefix}:{page + 1}"))
     return nav
 
 def picker_back_cancel_row() -> list:
-    return [InlineKeyboardButton("◀ Back", callback_data="mb"), InlineKeyboardButton("✗ Cancel", callback_data="mx")]
+    return [InlineKeyboardButton(t("platform.telegram.picker.back"), callback_data="mb"), InlineKeyboardButton(t("platform.telegram.picker.cancel"), callback_data="mx")]
 
 def get_model_pricing_detail(provider_slug: str, model_id: str, live_pricing: Optional[dict] = None) -> dict:
     """Extract exact pricing and discount/promo information for a model on a given provider."""
@@ -187,14 +199,14 @@ async def picker_selection(query, state: dict, raw_idx: str) -> Optional[tuple]:
     try:
         idx = int(raw_idx)
     except ValueError:
-        await query.answer(text="Invalid selection.")
+        await query.answer(text=_toast("platform.telegram.picker.invalid_selection"))
         return None
     model_list = state.get("model_list", [])
     if idx < 0 or idx >= len(model_list):
-        await query.answer(text="Invalid model index.")
+        await query.answer(text=_toast("platform.telegram.picker.invalid_model_index"))
         return None
     callback = state.get("on_model_selected")
     if not callback:
-        await query.answer(text="Picker expired.")
+        await query.answer(text=_toast("platform.telegram.picker.expired"))
         return None
     return idx, model_list[idx], state.get("selected_provider", ""), callback
